@@ -16,7 +16,7 @@ b = 0.3
 a = 1
 s <- c(0,2) # simulate 2 time series with shift 0 and 2
 kernel = c("rbf","exp","matern3/2")
-## sample size 20
+## sample size 20 in Fig.1c
 n = 20
 Y_rbf20 = simulateData(b,a,s,tau2, n, kernel = "rbf")
 Y_exp20 = simulateData(b,a,s,tau2, n, kernel = "exp")
@@ -25,15 +25,16 @@ res20 <- list()
 res20[["rbf_rbf"]] <- deriveEstimation(Y_rbf20, kernel = "rbf")
 res20[["exp_exp"]] <- deriveEstimation(Y_exp20, kernel ="exp")
 res20[["matern_matern"]] <- deriveEstimation(Y_matern20, kernel = "matern")
+## filter replicates where parameter estimation hit boundary
 res_filter20 <- lapply(1:3,function(i){
   res20[[i]][res20[[i]][,1] != softplus(-20) & res20[[i]][,2] < 10 & res20[[i]][,2] != softplus(-10),]
 })
 
-## sample size 50
+## sample size 50 in Fig.1c
 n = 50
-Y_rbf50 = simulateData2(b,a,s,tau2, n, kernel = "rbf")
-Y_exp50 = simulateData2(b,a,s,tau2, n, kernel = "exp")
-Y_matern50 = simulateData2(b,a,s,tau2, n, kernel = "matern")
+Y_rbf50 = simulateData(b,a,s,tau2, n, kernel = "rbf")
+Y_exp50 = simulateData(b,a,s,tau2, n, kernel = "exp")
+Y_matern50 = simulateData(b,a,s,tau2, n, kernel = "matern")
 res50 <- list()
 res50[["rbf_rbf"]] <- deriveEstimation(Y_rbf50, kernel = "rbf")
 res50[["exp_exp"]] <- deriveEstimation(Y_exp50, kernel = "exp")
@@ -42,10 +43,11 @@ res_filter50 <- lapply(1:3,function(i){
   res50[[i]][res50[[i]][,1] != softplus(-10) & res50[[i]][,2] < 10,]
 })
 
+## sample size 100 in Fig.1 all panels
 n = 100
-Y_rbf100 = simulateData2(b,a,s,tau2, n, kernel = "rbf")
-Y_exp100 = simulateData2(b,a,s,tau2, n, kernel = "exp")
-Y_matern100 = simulateData2(b,a,s,tau2, n, kernel = "matern")
+Y_rbf100 = simulateData(b,a,s,tau2, n, kernel = "rbf")
+Y_exp100 = simulateData(b,a,s,tau2, n, kernel = "exp")
+Y_matern100 = simulateData(b,a,s,tau2, n, kernel = "matern")
 res100 <- list()
 res100[["rbf_rbf"]] <- deriveEstimation(Y_rbf100, kernel = "rbf")
 res100[["exp_exp"]] <- deriveEstimation(Y_exp100, kernel ="exp")
@@ -53,12 +55,14 @@ res100[["matern_matern"]] <- deriveEstimation(Y_matern100, kernel = "matern")
 res_filter100 <- lapply(1:3,function(i){
   res100[[i]][res100[[i]][,1] != softplus(-10) & res100[[i]][,2] < 10,]
 })
+## save simulated data and Lead-Lag in python to compare
 write.csv(Y_exp100, file = "data/yexp100.csv")
 write.csv(Y_rbf100, file = "data/yrbf100.csv")
 write.csv(Y_matern100, file = "data/ymatern100.csv")
 
+## sample size 200 in Fig.1c
 n = 200
-Y_exp200 = simulateData2(b,a,s,tau2, n, kernel = "exp")
+Y_exp200 = simulateData(b,a,s,tau2, n, kernel = "exp")
 res200 <- list()
 res200[["exp_exp"]] <- deriveEstimation(Y_exp200, "exp")
 res_filter200 <- lapply(1:1,function(i){
@@ -67,6 +71,8 @@ res_filter200 <- lapply(1:1,function(i){
 
 save(res20,res50,res100,res200, file = "data/simulation.rda")
 load("data/simulation.rda")
+
+# concatenate various sample size data together
 df20 <- do.call("rbind", res_filter20) %>% as.data.frame() %>%
   `colnames<-`(c("bhat","ahat","shat","tau2", "ll")) %>%
   mutate(n = 20,
@@ -89,7 +95,7 @@ df200 <- do.call("rbind", res_filter200) %>% as.data.frame() %>%
 dat <- rbind(df,df50, df100,df200)
 dat$n <- as.factor(dat$n)
 
-
+# change outliers color in boxplot
 is.outlier <- function (x) {
   x < quantile(x, .25) - 1.5 * IQR(x) |
     x > quantile(x, .75) + 1.5 * IQR(x)
@@ -97,6 +103,8 @@ is.outlier <- function (x) {
 df100 %>% group_by(kernel) %>%
   mutate(outlier.p = is.outlier(ahat),outlier.s = is.outlier(shat)) %>%
   ungroup() -> df100.out
+
+## plot Figure 1a
 p1 = ggplot(df100.out,aes(y = ahat, x= kernel, fill = kernel))+
   geom_boxplot(outlier.size = 0.5)+
   geom_point(data = df100.out[df100.out$outlier.p,], aes(col = kernel))+
@@ -110,6 +118,8 @@ p1 = ggplot(df100.out,aes(y = ahat, x= kernel, fill = kernel))+
   ylab("Fitted value of a") +
   ylim(-1,3)
 # scale_fill_simpsons()
+
+# read in Lead-Lag result and plot Figure 1b
 leadlag.rbf = read.csv("data/lead-lag-rbf.csv")
 leadlag.matern = read.csv("data/lead-lag-matern.csv")
 leadlag.exp = read.csv("data/lead-lag-exp.csv")
@@ -131,27 +141,7 @@ p2 = ggplot(p2data,aes(y = shat, x= model, fill = model))+
   xlab("Method")+
   ylab("Fitted value of s ")
 
-df_matern <- df100 %>% filter(kernel != "rbf") %>%
-  mutate(multipllicity = tau2* (bhat^ifelse(kernel=="exp",1,3)))%>% group_by(kernel) %>%
-  mutate(outlier.p = is.outlier(multipllicity)) %>%
-  ungroup()
-
-
-p3 <- ggplot(df_matern,aes(y = multipllicity, x= kernel, fill = kernel))+
-  geom_boxplot(outlier.size = 0.5)+
-  geom_point(data = df_matern[df_matern$outlier.p,], aes(col = kernel))+
-  # geom_segment(aes(x="exp",xend="matern3/2",y=4*(0.3^3),yend=4*(0.3^3)),linetype = "dashed", linewidth = 1,col = wes_palette("Rushmore1")[5])
-  geom_hline(yintercept = 4*(0.3^3), linetype = "dashed", linewidth = 1, col = wes_palette("Rushmore1")[5]) +
-  geom_hline(yintercept = 4*(0.3^1), linetype = "dashed", linewidth = 1, col = wes_palette("Rushmore1")[5]) +
-  scale_fill_manual(values = wes_palette("Rushmore1"))+
-  scale_colour_manual(values = wes_palette("Rushmore1"))+
-  ylim(0,2.5)+
-  theme(panel.background = element_rect(fill = "white", colour = "grey20"),
-        legend.position="none") +
-  xlab("Kernel") +
-  ylab(TeX("$\\sigma^2b^{2\\nu}$"))
-
-
+# select LExp results in various sample size and plot figure 1c
 dat_exp <- dat %>% filter(kernel == "exp") %>%
   dplyr::select(ahat,shat,n) %>%
   tidyr::pivot_longer(ahat:shat,names_to ="paramater")%>% group_by(paramater,n) %>%

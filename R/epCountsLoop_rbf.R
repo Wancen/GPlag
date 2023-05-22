@@ -15,48 +15,6 @@ source("TMGGP_functions.R")
 library(DelayedArray)
 library(SummarizedExperiment)
 
-## Load expectedCounts
-# expectedCounts <- readRDS("data/h5/expectedCounts.rds")
-
-# ## Update path to count data
-# path(assay(expectedCounts)) <- "data/h5/expectedCounts.h5"
-
-# # ## Access count data
-# obs_hic = mcols(epCounts)[,183:189]  |> as.matrix()
-# M <- as(obs_hic, "HDF5Matrix")
-# exp_hic = counts(expectedCounts)[,1:7]  |> as.matrix()
-# expectedCounts_all = 1 + (obs_hic - exp_hic) / (exp_hic + 1)
-# epCounts$hic_max = rowMax(expectedCounts_all)
-# epCounts$expectedCounts <- counts(expectedCounts)[,"LIMA_THP1_WT_LPIF_CMB_S_0.0.0_omegaMap_inter_withNorms.hic"]
-
-
-# ## 22813 pairs left
-# epCounts$distance = pairdist(epCounts)
-# epCounts_nonstatic <- epCounts[epCounts$anchor1.K27_cluster != "static" & epCounts$anchor2.RNA_cluster!="static" & epCounts$distance < 250000]
-# # save(epCounts_nonstatic, shiftprior, theta, file = "LIMA_binnedEPCounts_nonstatic.rda")
-# # load("LIMA_binnedEPCounts_nonstatic.rda")
-
-# # epCounts_nonstatic
-# peak<-epCounts_nonstatic %>% mcols() %>%
-#   as.data.frame() %>%
-#   dplyr::select(anchor1.K27_m0000_VST:anchor1.K27_m0360_VST) %>% t() %>% `colnames<-`(epCounts_nonstatic$anchor1.K27_name)
-
-# gene<-epCounts_nonstatic %>% mcols() %>%
-#   as.data.frame() %>%
-#   dplyr::select(anchor2.RNA_m0000_VST:anchor2.RNA_m0360_VST) %>% t() %>% `colnames<-`(epCounts_nonstatic$anchor2.RNA_hgnc)
-
-# dat <- rbind(gene,peak) %>% `colnames<-`(paste(colnames(gene),colnames(peak),sep = "-"))
-
-# ## second filter
-# peak_max = apply(peak,2,max)
-# peak_index = peak_max > median(peak_max)
-# gene_max = apply(gene,2,max)
-# gene_index = gene_max > median(gene_max)
-
-# filter2 = peak_index & gene_index
-# dat_filter = dat[,filter2]
-# epCounts_filter <- epCounts_nonstatic[filter2]
-
 load(file = "LIMA_binnedEPCounts_nonstatic.rda")
 peak<-epCounts_filter %>% mcols() %>%
   as.data.frame() %>%
@@ -89,20 +47,7 @@ shiftprior <- pbsapply(1:ncol(Y.shift), function(i){
 table(shiftprior)
 
 # Run GP first to derive mean b as initialization
-# library(GauPro)
 eps <- sqrt(.Machine$double.eps)
-# theta <- pbsapply(1:ncol(peak), function(i){
-#   y = peak[,i] %>% unlist() |> unname()
-#   y <- y-mean(y)
-#   gp <- GauPro(X=t, Z=y)
-#   theta <- gp$theta
-#   # gpi <- newGPsep(t %>% as.matrix(), y, d = 1, g = 0.1 * var(y), dK = TRUE)
-#   # mle <- mleGPsep(gpi, param="d", tmin=0.1, tmax=10)
-#   # theta <- 1/mle$d
-#   return(min(theta,10))
-# })
-# summary(theta)
-# hist(theta)
 
 library(mlegp)
 theta <- pbsapply(1:ncol(dat_filter), function(i){
@@ -110,16 +55,12 @@ theta <- pbsapply(1:ncol(dat_filter), function(i){
   y <- y-mean(y)
   invisible(capture.output(gp <- mlegp(matrix(t,ncol = 1), y, verbose = 0)))
   theta <- gp$beta
-  # gpi <- newGPsep(t %>% as.matrix(), y, d = 1, g = 0.1 * var(y), dK = TRUE)
-  # mle <- mleGPsep(gpi, param="d", tmin=0.1, tmax=10)
-  # theta <- 1/mle$d
   return(min(theta,10))
 }, cl=18)
 
-# which(colnames(dat_filter)=="NAV3-RR_peak_44733")
 save(epCounts_filter, shiftprior, theta, file = "LIMA_binnedEPCounts_nonstatic.rda")
 
-
+# derive parameter estimation for each pair of time series
 res2 <- pbsapply(1:ncol(dat_filter),function(i){
   s.init <- shiftprior[i]
   b.init <- theta[i]
@@ -139,8 +80,6 @@ res2 <- pbsapply(1:ncol(dat_filter),function(i){
   ### 1. same group covariance
   Ahat = (ahat^2)*delta+1
   D <-  plgp::distance(c(t,t2hat))/Ahat
-  # eps <- sqrt(.Machine$double.eps)
-  # D2 <- dist(X, diag = T,upper = T)^2 %>% as.matrix() ## althernative way
   Chat <- exp(-bhat*D)
   Vk = (1/sqrt(Ahat)*Chat) %>% as.matrix()+diag(ghat,nrow(Y.shift)) ## covariance matrix
   Vi <- pinv(Vk) ## psduo-inverse covariance matrix
@@ -152,18 +91,12 @@ res2 <- pbsapply(1:ncol(dat_filter),function(i){
   return(c(bhat,ahat,shat,muhat,ghat,tau2hat2))
 },cl=18)
 
-# knitr::kable(
-#   res %>% `rownames<-`(c("b","a","s","mu","tau2")),
-#   col.names = colnames(Y)
-# )
+
 write_csv(res2 %>% as.data.frame() %>% `colnames<-`(colnames(dat_filter)),file="LIMA_binnedEPCounts_nonstatic.rbf.estimated.param.csv")
 
 # load("LIMA_binnedEPCounts_nonstatic_res.rda")
-# library(ggplot2)
-# pdf("../plots/Gene-epCounts_filter-posterior.pdf",         # File name
-#     width = 8, height = 5, # Width and height in inches
-#     colormodel = "cmyk")
-# par(mfrow = c(2, 3))
+
+# derive posterior samples' correlation and credible interval
 ci <-pbsapply(1: ncol(dat_filter),function(i){
   params <- res2[,i]
   cor <- interpolation.rbf(t,Y_shift=Y.shift[,i],delta,group.size,params,ntest=100, plot = FALSE)

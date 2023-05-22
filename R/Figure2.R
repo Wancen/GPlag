@@ -51,7 +51,7 @@ mse.mtsgp <- sapply(1:100, function(i){
 
   # fit sep GP
   params = mtsgp.sgp.train[i,]
-  yhat <- interpolation_sim(t,Y,params,ttest)
+  yhat <- interpolation_sim(t,Y,params,ttest, kernel = "sep.matern")
   res.sep <- mean((Y.mtsgp.test[,i] - yhat)^2)
 
   # fit MAGMAclust
@@ -168,9 +168,6 @@ a_across<- sapply(1:length(s_across), function(i){
   out <- optim(c(1,1,0), nl_exp, method="L-BFGS-B",lower=c(-10,-10,-1),
                upper=c(20,Inf,4),
                t= c(X,X), Y=c(y1,y2), delta=delta,group.size = group.size)
-  # params = c(softplus(out$par[1:2]),out$par[3])
-  # yhat <- interpolation_sim(t = c(X,X),Y=c(y1,y2), params,ttest = c(Xtest, Xtest))
-  # cor = cor(yhat[1:200,1],yhat[201:400,1])
   return(c(softplus(out$par[2]),out$par[3]))
 })
 
