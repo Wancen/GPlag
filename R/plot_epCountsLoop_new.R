@@ -177,10 +177,7 @@ chisq.test(table)
 fisher.test(table)
 
 
-pdf("plots/Top-similarity-pairs.pdf",         # File name
-    width = 16, height = 5, # Width and height in inches
-    colormodel = "cmyk")
-jpeg(file="/proj/milovelab/mu/lima/plots/Top-similarity-pairs.jpg",width = 15, height = 3,units = "in",res=450)
+jpeg(file="Top-similarity-pairs.jpg",width = 15, height = 3,units = "in",res=450)
 par(mfrow = c(1, 4))
 data3 = data2[order(data2$similarity),]
 pair.names <- rownames(data3[which(data3$similarity < 0.1 & data3$time_shift != 2 & data3$y_shift != -7),])

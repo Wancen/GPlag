@@ -10,10 +10,10 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 # set to training mode and train
 
 # Define the custom kernel
-class MTSRBF(gpytorch.kernels.Kernel):
+class LRBF(gpytorch.kernels.Kernel):
 
     def __init__(self, sigma=1, alpha = 1, length = 1, timelag_init_value = 0, sigma_constraint = None, alpha_constraint = None, length_constraint = None, timelag_lower_bound = None, timelag_upper_bound = None):
-        super(MTSRBF, self).__init__()
+        super(LRBF, self).__init__()
         self.raw_alpha = torch.nn.Parameter(torch.tensor(alpha, dtype=torch.float32).log())
         self.register_parameter(name="raw_alpha", parameter=self.raw_alpha)
         if alpha_constraint is None:
@@ -122,10 +122,10 @@ class MTSRBF(gpytorch.kernels.Kernel):
         cov_mat = self.sigma * C.div(torch.sqrt(A)) + torch.eye(n1+n2) * jitter
         return cov_mat
 
-class MTSE(gpytorch.kernels.Kernel):
+class LExp(gpytorch.kernels.Kernel):
 
     def __init__(self, sigma=1, alpha = 1, length = 1, timelag_init_value = 0, sigma_constraint = None, alpha_constraint = None, length_constraint = None, timelag_lower_bound = None, timelag_upper_bound = None):
-        super(MTSE, self).__init__()
+        super(LExp, self).__init__()
         self.raw_alpha = torch.nn.Parameter(torch.tensor(alpha, dtype=torch.float32).log())
         self.register_parameter(name="raw_alpha", parameter=self.raw_alpha)
         if alpha_constraint is None:
@@ -263,9 +263,9 @@ class GPModel(gpytorch.models.ExactGP):
         covar_x = self.covar_module(x, x, n1, n2)  # pass n1 and n2 here
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
-class MTSGP(gpytorch.models.ExactGP):
+class LGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, kernel):
-        super(MTSGP, self).__init__(train_x, train_y, likelihood)
+        super(LGP, self).__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ConstantMean()
         self.covar_module = kernel
 
