@@ -54,7 +54,7 @@ mse.mtsgp <- sapply(1:100, function(i){
   yhat <- interpolation_sim(t,Y,params,ttest, kernel = "sep.matern")
   res.sep <- mean((Y.mtsgp.test[,i] - yhat)^2)
 
-  # fit MAGMAclust
+  # fit MAGMA
   magma_train <- tibble(ID = rep(c("1","2"), each = n), Input = t, Output = Y)
   magma_pred1 <- tibble(ID = rep("1", n), Input = ttest[1:n], Output = unname(Y.mtsgp.test[1:n,i]))
   magma_pred2 <- tibble(ID = rep("2", n), Input = ttest[(n+1):(2*n)], Output = unname(Y.mtsgp.test[(n+1):(2*n),i]))
@@ -97,7 +97,6 @@ p6
 
 ## Simulation 3 -clustering/ranking
 n <- 50
-X <- matrix(seq(0, 2*pi, length=n), ncol=1)
 X <- matrix(seq(-2, 2, length=n), ncol=1)
 k=0.01
 y1 <- atan(k*X)/atan(k)
