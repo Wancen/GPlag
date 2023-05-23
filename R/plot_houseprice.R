@@ -1,17 +1,12 @@
 # Load necessary libraries
 library(ggplot2)
 library(tidyverse)
-inventory_price<-read.csv(file = "data/inventory_price_location.csv")
-inventory_price_filter<- inventory_price %>% filter(observation > 10)
 baseline<-read.csv(file = "data/baselineprice2.csv")
 
+baseline$county <- sub(",.*", "", baseline$region_name) # extract text before the comma
+baseline$state <- sub(".*\\b([A-Z]{2})\\b.*", "\\1", baseline$region_name) # extract two capital letters surrounded by word boundaries
 
-inventory_price_filter$cluster <- memb$cluster
-inventory_price_filter$county <- sub(",.*", "", inventory_price_filter$region_name) # extract text before the comma
-inventory_price_filter$state <- sub(".*\\b([A-Z]{2})\\b.*", "\\1", inventory_price_filter$region_name) # extract two capital letters surrounded by word boundaries
-
-all <- inventory_price_filter %>% left_join(baseline)
-all %>% filter(state =="NC") -> res.price
+baseline %>% filter(state =="NC") -> res.price
 res.price$county[which(res.price$county == "Durham")] = "Durham-Chapel Hill"
 res.price$county[which(res.price$county == "Raleigh")] = "Raleigh-Cary"
 res.price$county[which(res.price$county == "Greensboro")] = "Greensboro-High Point"
