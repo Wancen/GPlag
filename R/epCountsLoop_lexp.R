@@ -4,18 +4,17 @@ library(tidyverse)
 library(MASS)
 library(pracma)
 library(Matrix)
-library(condmixt)
 library(pbapply)
 library(GenomicRanges)
 library(InteractionSet)
-source("GPlag.R")
+source("script/GPlag.R")
 # epCounts %>% mcols() %>% colnames()
 
 ## Load libraries for accessing counts
 library(DelayedArray)
 library(SummarizedExperiment)
 
-load(file = "LIMA_binnedEPCounts_nonstatic.rda")
+load(file = "data/LIMA_binnedEPCounts_nonstatic.rda")
 peak<-epCounts_filter %>% mcols() %>%
   as.data.frame() %>%
   dplyr::select(anchor1.K27_m0000_VST:anchor1.K27_m0360_VST) %>% t() %>% `colnames<-`(paste0(seqnames(anchors(epCounts_filter, type="first"))," ",start(anchors(epCounts_filter, type="first")),"-", end(anchors(epCounts_filter, type="first"))))
@@ -38,36 +37,35 @@ meanGene = colMeans(dat_filter[1:n,])
 meanGeneMat <- matrix(rep(meanGene, each = 2 * n), nrow = 2 * n)
 Y.shift <- dat_filter - meanGeneMat
 
-## use ccf to derive shift initialization
-negative_index = floor(10*log10(n/2))+1
-shiftprior <- pbsapply(1:ncol(Y.shift), function(i){
-  cc <- ccf(Y.shift[1:n,i],Y.shift[(n+1):(2*n),i],plot=FALSE)
-  t[cc$lag[negative_index+which.max(cc$acf[negative_index:(2*negative_index-1)])-1]+1]
-},cl=18)
-table(shiftprior)
+# ## use ccf to derive shift initialization
+# negative_index = floor(10*log10(n/2))+1
+# shiftprior <- pbsapply(1:ncol(Y.shift), function(i){
+#   cc <- ccf(Y.shift[1:n,i],Y.shift[(n+1):(2*n),i],plot=FALSE)
+#   t[cc$lag[negative_index+which.max(cc$acf[negative_index:(2*negative_index-1)])-1]+1]
+# },cl=18)
+# table(shiftprior)
 
-# Run GP first to derive mean b as initialization
+# # Run GP first to derive mean b as initialization
+# library(mlegp)
+# theta <- pbsapply(1:ncol(dat_filter), function(i){
+#   y = dat_filter[(n+1):(2*n),i] %>% unlist() |> unname()
+#   y <- y-mean(y)
+#   invisible(capture.output(gp <- mlegp(matrix(t,ncol = 1), y, verbose = 0)))
+#   theta <- gp$beta
+#   return(min(theta,10))
+# }, cl=18)
+
+# save(epCounts_filter, dat_filter, shiftprior, theta, file = "data/LIMA_binnedEPCounts_nonstatic.rda")
+
 eps <- sqrt(.Machine$double.eps)
-
-library(mlegp)
-theta <- pbsapply(1:ncol(dat_filter), function(i){
-  y = dat_filter[(n+1):(2*n),i] %>% unlist() |> unname()
-  y <- y-mean(y)
-  invisible(capture.output(gp <- mlegp(matrix(t,ncol = 1), y, verbose = 0)))
-  theta <- gp$beta
-  return(min(theta,10))
-}, cl=18)
-
-save(epCounts_filter, shiftprior, theta, file = "LIMA_binnedEPCounts_nonstatic.rda")
-
 # derive parameter estimation for each pair of time series
-res2 <- pbsapply(1:ncol(dat_filter),function(i){
+res <- pbsapply(1:ncol(dat_filter),function(i){
   s.init <- shiftprior[i]
   b.init <- theta[i]
   out <- optim(c(softplusinv(b.init), softplusinv(1), s.init, 0, 0.01 * var(Y.shift[,i])),
-          nl4, method="L-BFGS-B",
+          nl_exp_advanced, method="L-BFGS-B",
           lower = c(-5,-10,0,-7,eps),
-          upper = c(20,Inf,2,7,0.1*var(Y.shift[,i])),
+          upper = c(20,500,2,7,0.1*var(Y.shift[,i])),
           t = tinput, Y = Y.shift[,i], delta = delta, group.size = group.size)
   # res[i,]<- out$par
   bhat = softplus(out$par[1])
@@ -79,9 +77,10 @@ res2 <- pbsapply(1:ncol(dat_filter),function(i){
   ## derive covariance function Paper 4.1
   ### 1. same group covariance
   Ahat = (ahat^2)*delta+1
-  D <-  plgp::distance(c(t,t2hat))/Ahat
+  D <- sqrt(plgp::distance(c(t,t2hat)))
+  
   Chat <- exp(-bhat*D)
-  Vk = (1/sqrt(Ahat)*Chat) %>% as.matrix()+diag(ghat,nrow(Y.shift)) ## covariance matrix
+  Vk = (1/Ahat*Chat) %>% as.matrix() + diag(ghat, nrow(Y.shift))
   Vi <- pinv(Vk) ## psduo-inverse covariance matrix
   group.size$values <- c(0,muhat)
   mu.expand <- inverse.rle(group.size)
@@ -92,18 +91,19 @@ res2 <- pbsapply(1:ncol(dat_filter),function(i){
 },cl=18)
 
 
-write_csv(res2 %>% as.data.frame() %>% `colnames<-`(colnames(dat_filter)),file="LIMA_binnedEPCounts_nonstatic.rbf.estimated.param.csv")
+write_csv(res %>% as.data.frame() %>% `colnames<-`(colnames(dat_filter)),file="data/LIMA_binnedEPCounts_nonstatic.lexp.estimated.param.csv")
 
 # load("LIMA_binnedEPCounts_nonstatic_res.rda")
 
 # derive posterior samples' correlation and credible interval
+# res<-read.csv(file="data/LIMA_binnedEPCounts_nonstatic.lexp.estimated.param.csv")
 ci <-pbsapply(1: ncol(dat_filter),function(i){
-  params <- res2[,i]
-  cor <- interpolation.kernel(t,Y_shift=Y.shift[,i],delta,group.size,params,ntest=100, kernel = "lrbf", plot = FALSE)
+  params <- res[,i]
+  cor <- interpolation.kernel(t,Y_shift=Y.shift[,i],delta,group.size,params,ntest=100, kernel = "lexp", plot = FALSE)
   return(c(cor[[1]],quantile(cor[[2]],c(0.05,0.95))))
 },cl=18)
 
 # plotPair(Y.shift,2,t, s=c(0,shat), mu=muhat)
-write_csv(ci %>% as.data.frame() %>% `colnames<-`(colnames(dat_filter)),file="LIMA_binnedEPCounts_nonstatic.rbf.ci.csv")
+write_csv(ci %>% as.data.frame() %>% `colnames<-`(colnames(dat_filter)),file="data/LIMA_binnedEPCounts_nonstatic.lexp.ci.csv")
 
 

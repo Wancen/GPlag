@@ -92,6 +92,13 @@ nl_rbf <- function(par, t, Y, delta, group.size) # group.size is rle of group.in
   return(-ll)
 }
 
+softplusinv <- function(y) {
+  log(exp(y) - 1)
+}
+
+softplus <- function(x) {
+  log(1 + exp(x))
+}
 
 ## LExp loglikelihood without vertical shift and jitter for simulation
 nl_exp <- function(par, t, Y, delta, group.size) # group.size is rle of group.index
@@ -134,7 +141,7 @@ nl_matern <- function(par, t, Y, delta, group.size) # group.size is rle of group
   dist = sqrt(plgp::distance(tinput))
   dist[dist == 0] <- 1e-8
   v = 3/2
-  part1 = tau2*(b*dist)^v
+  part1 = (b*dist)^v
   part2 = (A^(v+0.5))
   part3 = besselK(b*dist, nu = v)
   Vk = part1 * part3 /part2
@@ -149,7 +156,7 @@ nl_matern <- function(par, t, Y, delta, group.size) # group.size is rle of group
 }
 
 ## LRBF loglikelihood with vertical shift and jitter for real application
-nl4 <- function(par, t, Y, delta,group.size) # group.size is rle of group.index
+nl4 <- function(par, t, Y, delta, group.size) # group.size is rle of group.index
 {
   ngroup <- length(group.size$values)
   b <- softplus(par[1])
@@ -174,10 +181,78 @@ nl4 <- function(par, t, Y, delta,group.size) # group.size is rle of group.index
   Y_shift <- Y - mu.expand
   ll <- - (k/2)*log(t(Y_shift) %*% Vi %*% Y_shift) - (1/2)*ldetK
   # counter <<- counter + 1
-  # cat(b,a, s, -ll, "\n")
+  # cat(b,a, s, mu, g, -ll, "\n")
   return(-ll)
 }
 
+## LExp loglikelihood with vertical shift and jitter for real application
+nl_exp_advanced <- function(par, t, Y, delta, group.size) # group.size is rle of group.index
+{
+  ngroup <- length(group.size$values)
+  b <- softplus(par[1])
+  a <- softplus(par[2])
+  s <- par[3:(1+ngroup)]
+  mu <- par[(2+ngroup):(2*ngroup)]
+  g <- par[2*ngroup+1]
+  k <- length(Y)
+  group.size$values <- c(0,s)
+  s.expand <- inverse.rle(group.size) # input t vector
+  tinput <- t+s.expand
+  A = (a^2)*delta+1
+  D <- sqrt(plgp::distance(tinput))
+  C <- exp(-b*D) ## covariance matrix
+  Vk = (1/A*C) %>% as.matrix() + diag(g, k)
+  Vi <- pinv(Vk)
+  ldetK <- determinant(Vk, logarithm=TRUE)$modulus
+  if(is.infinite(ldetK)){ldetK=-1e6}
+
+  group.size$values <- c(0,mu)
+  mu.expand <- inverse.rle(group.size)
+  Y_shift <- Y - mu.expand
+  ll <- - (k/2)*log(t(Y_shift) %*% Vi %*% Y_shift) - (1/2)*ldetK
+  # counter <<- counter + 1
+  # cat(b,a, s, mu, g, -ll, "\n")
+  return(-ll)
+}
+
+nl_matern_advanced <- function(par, t, Y, delta, group.size) {
+  ngroup <- length(group.size$values)
+  b <- softplus(par[1])
+  a <- softplus(par[2])
+  s <- par[3:(1+ngroup)]
+  mu <- par[(2+ngroup):(2*ngroup)]
+  g <- par[2*ngroup+1]
+  k <- length(Y)
+  
+  group.size$values <- c(0, s)
+  s.expand <- inverse.rle(group.size)  # input t vector
+  tinput <- t + s.expand
+  
+  A = (a^2) * delta + 1
+  dist = sqrt(plgp::distance(tinput))
+  dist[dist == 0] <- 1e-8
+  
+  v = 3/2
+  part1 = (b * dist)^v
+  part2 = (A^(v + 0.5))
+  part3 = besselK(b * dist, nu = v)
+  Vk = (part1 * part3 / part2) %>% as.matrix() + diag(g, k)  # add g to the diagonal for stability
+  Vi <- pinv(Vk)
+  
+  ldetK <- determinant(Vk, logarithm = TRUE)$modulus
+  if (is.infinite(ldetK)) {
+    ldetK <- -1e6
+  }
+  
+  group.size$values <- c(0, mu)
+  mu.expand <- inverse.rle(group.size)
+  Y_shift <- Y - mu.expand
+  
+  ll <- - (k / 2) * log(t(Y_shift) %*% Vi %*% Y_shift / k) - (1 / 2) * ldetK
+  # counter <<- counter + 1
+  # cat(b,a, s, mu, g, -ll, "\n")
+  return(-ll)
+}
 
 ## GP RBF loglikelihood with for simulation
 nlgp <- function(par, t, Y) # group.size is rle of group.index
@@ -386,55 +461,102 @@ deriveEstimation <-  function(Y, kernel, sl = 0, su = 4){
   return(res)
 }
 
-# helper function for prediction applying LRBF kernel
+# helper function for prediction
 ## ntest : the number of test points
 ## delta: group matrix
 ## group.size : RLE vector indicate time series labels
 ## params : output from deriveEstimation
-interpolation.rbf <- function(t, Y_shift, delta, group.size, params, ntest, plot = TRUE){
+interpolation.kernel <- function(t, Y_shift, delta, group.size, params, ntest, kernel = "lrbf", plot = TRUE){
   tt <- matrix(seq(min(t), max(t), length.out=ntest), ncol=1)
-  # tt2 <- tt+shat # use shat=0 if directly model the predicted value after shift
-  ttest <- rbind(tt,tt) # concatenate two time series time together
-  group.index.test <- rep(c(1,2),each=ntest)
+  ttest <- rbind(tt, tt) # concatenate two time series time together
+  group.index.test <- rep(c(1, 2), each = ntest)
   group.size.test <- rle(group.index.test)
-  # test sets group matrix
-  deltatest = Matrix(1-bdiag(replicate(2,matrix(1,ntest,ntest),simplify=FALSE)),sparse = TRUE)
+  deltatest = Matrix(1 - bdiag(replicate(2, matrix(1, ntest, ntest), simplify = FALSE)), sparse = TRUE)
 
   bhat <- params[1]
   ahat <- params[2]
   shat <- params[3]
   muhat <- params[4]
-  # ghat <- params[5]
-  tau2hat2 <- params[5]
+  ghat <- params[5]
+  tau2hat2 <- params[6]
 
+  t2hat <- t + shat
   ## derive original inverse covariance kernel
-  t2hat <- t+shat
-  Ahat = (ahat^2)*delta+1
-  D <-  plgp::distance(c(t,t2hat))/Ahat
-  Chat <- exp(-bhat*D)
-  Vk = (1/sqrt(Ahat)*Chat) %>% as.matrix() ## covariance matrix
-  Vi <- pinv(Vk) ## psduo-inverse covariance matrix
-  Vi <- (1/2)*(Vi+t(Vi))
-  group.size$values <- c(0,muhat)
+  Ahat = (ahat^2) * delta + 1
+  if (kernel == "lrbf") {
+    D <- plgp::distance(c(t, t2hat)) / Ahat
+    Chat <- exp(-bhat * D)
+    Vk = (1 / sqrt(Ahat) * Chat) %>% as.matrix() ## covariance matrix
+  } else if (kernel == "lexp") {
+    D <- sqrt(plgp::distance(c(t, t2hat)))
+    Chat <- exp(-bhat * D)
+    Vk = (1/Ahat*Chat) %>% as.matrix()
+  } else if (kernel == "lmatern") {
+    v = 1.5  # Matérn ν parameter
+    D <- sqrt(plgp::distance(c(t, t2hat)))
+    D[D == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * D)^v
+    part2 = (Ahat^(v + 0.5))
+    part3 = besselK(bhat * D, nu = v)
+    Vk = (part1 * part3 / part2)%>% as.matrix()
+  } else {
+      stop("Unsupported kernel type")
+  }
+
+  Vi <- pinv(Vk) ## psuedo-inverse covariance matrix
+  Vi <- (1 / 2) * (Vi + t(Vi))
+  group.size$values <- c(0, muhat)
   mu.expand <- inverse.rle(group.size)
   Y_shifthat <- Y_shift - mu.expand
 
   ## derive test sets inverse covariance kernel
   Ahat = (ahat^2)*deltatest+1
-  Dtest <- plgp::distance(ttest)/Ahat
-  Ctt <- exp(-bhat*Dtest) ## covariance matrix
-  Vtt = (1/sqrt(Ahat)*Ctt) %>% as.matrix() + diag(ghat,2*ntest)
+  if (kernel == "lrbf") {
+    Dtest <- plgp::distance(ttest)/Ahat
+    Ctt <- exp(-bhat*Dtest) ## covariance matrix
+    Vtt = (1/sqrt(Ahat)*Ctt) %>% as.matrix() + diag(ghat,2*ntest)
+  } else if (kernel == "lexp") {
+    Dtest <- sqrt(plgp::distance(ttest))
+    Ctt <- exp(-bhat * Dtest)
+    Vtt = (1/Ahat*Ctt) %>% as.matrix() + diag(ghat,2*ntest)
+  } else if (kernel == "lmatern") {
+    v = 1.5  # Matérn ν parameter
+    Dtest <- sqrt(plgp::distance(ttest))
+    Dtest[Dtest == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * Dtest)^v
+    part2 = (Ahat^(v + 0.5))
+    part3 = besselK(bhat * Dtest, nu = v)
+    Vtt = (part1 * part3 / part2)%>% as.matrix() + diag(ghat,2*ntest)
+  } else {
+      stop("Unsupported kernel type")
+  }
 
   ## derive off diagonal inverse covariance kernel
-  deltaoff = Matrix(1-bdiag(replicate(2,matrix(1,ntest,n),simplify=FALSE)),sparse = TRUE)
-  Ahatoff = (ahat^2)*deltaoff+1
-  Dtestoff <- plgp::distance(ttest,c(t,t2hat))/Ahatoff
-  Ct <- exp(-bhat*Dtestoff) ## covariance matrix
-  Vt = (1/sqrt(Ahatoff)*Ct) %>% as.matrix()
+  deltaoff = Matrix(1 - bdiag(replicate(2, matrix(1, ntest, length(t)), simplify = FALSE)), sparse = TRUE)
+  Ahatoff = (ahat^2) * deltaoff + 1
+  if (kernel == "lrbf") {
+    Dtestoff <- plgp::distance(ttest,c(t,t2hat))/Ahatoff
+    Ct <- exp(-bhat*Dtestoff) ## covariance matrix
+    Vt = (1/sqrt(Ahatoff)*Ct) %>% as.matrix()
+  } else if (kernel == "lexp") {
+    Dtestoff <- sqrt(plgp::distance(ttest,c(t,t2hat)))
+    Ct <- exp(-bhat * Dtestoff)
+    Vt = (1/Ahatoff*Ct) %>% as.matrix()
+  } else if (kernel == "lmatern") {
+    v = 1.5  # Matérn ν parameter
+    Dtestoff <- sqrt(plgp::distance(ttest,c(t,t2hat)))
+    Dtestoff[Dtestoff == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * Dtestoff)^v
+    part2 = (Ahatoff^(v + 0.5))
+    part3 = besselK(bhat * Dtestoff, nu = v)
+    Vt = (part1 * part3 / part2)%>% as.matrix() 
+  } else {
+      stop("Unsupported kernel type")
+  }
 
   mup2_shift <- Vt %*% Vi %*% (Y_shifthat)
-  Sigmap2 <- tau2hat2*(Vtt-Vt%*%Vi%*%t(Vt))
-  Sigmap2 <- (1/2)*(Sigmap2+t(Sigmap2))
+  Sigmap2 <- tau2hat2 * (Vtt - Vt %*% Vi %*% t(Vt))
+  Sigmap2 <- (1 / 2) * (Sigmap2 + t(Sigmap2))
 
   ## 100 prediction samples based on derived posterior mean and variance
   YY <- rmvnorm(100, mup2_shift, Sigmap2)
@@ -444,7 +566,7 @@ interpolation.rbf <- function(t, Y_shift, delta, group.size, params, ntest, plot
   cor <- sapply(1:100, function(j){
     return(cor(YY[j,1:ntest],YY[j,(ntest+1):(2*ntest)]))
   })
-
+  
   if(isTRUE(plot)){
     YY <- YY %>% t() %>% as.data.frame()
     YY$group <- c(rep("gene",ntest),rep("peak",ntest))
@@ -460,10 +582,10 @@ interpolation.rbf <- function(t, Y_shift, delta, group.size, params, ntest, plot
             panel.border = element_rect(fill = 'transparent'))
     print(p2)
   }
-
+  
+  ## return results
   return(list(cor_mean,cor))
 }
-
 
 # helper function for simulation prediction which only need posterior mean
 interpolation_sim <- function(t,Y,params,ttest, kernel = "lexp", prediction = TRUE){
