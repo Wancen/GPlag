@@ -1,7 +1,7 @@
 # Load necessary libraries
 library(ggplot2)
 library(tidyverse)
-baseline<-read.csv(file = "data/baselineprice2.csv")
+baseline<-read.csv(file = "/Users/wancen/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Lab/GRA/lima/data/baselineprice2.csv")
 
 baseline$county <- sub(",.*", "", baseline$region_name) # extract text before the comma
 baseline$state <- sub(".*\\b([A-Z]{2})\\b.*", "\\1", baseline$region_name) # extract two capital letters surrounded by word boundaries
@@ -13,7 +13,7 @@ res.price$county[which(res.price$county == "Greensboro")] = "Greensboro-High Poi
 res.price$county[which(res.price$county == "Hickory")] = "Hickory-Lenoir-Morganton"
 
 
-income<-read.csv(file = "data/personal_income.csv")%>% `colnames<-`(c("GeoFips", "GeoName","value"))
+income<-read.csv(file = "/Users/wancen/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Lab/GRA/lima/data/personal_income.csv")%>% `colnames<-`(c("GeoFips", "GeoName","value"))
 income$county <- sub(",.*", "", income$GeoName) # extract text before the comma
 income$state <- sub(".*\\b([A-Z]{2})\\b.*", "\\1", income$GeoName) # extract two
 income_nc <- income %>% filter(state =="NC")
