@@ -221,7 +221,7 @@ nl_matern <- function(par, t, Y, delta, group.size) # group.size is rle of group
   dist = sqrt(plgp::distance(tinput))
   dist[dist == 0] <- 1e-8
   v = 3/2
-  part1 = tau2*(b*dist)^v
+  part1 = (b*dist)^v
   part2 = (A^(v+0.5))
   part3 = besselK(b*dist, nu = v)
   Vk = part1 * part3 /part2
@@ -491,8 +491,8 @@ deriveEstimation <-  function(Y, kernel, b0 = 1, a0=1, s0=1, bu =20, sl = 0, su 
     # perform LExp parameter estimation
     for (i in 1:ncol(Y)) {
       yi = Y[,i]
-      out <- optim(c(b0,1,1), nl_exp.wa, method="L-BFGS-B",lower=c(-5,-2,sl),
-                   upper=c(20,Inf,su),
+      out <- optim(c(b0,a0,s0), nl_exp.wa, method="L-BFGS-B",lower=c(-5,-2,sl),
+                   upper=c(20,bu,su),
                    t= t, Y=yi, delta=delta,group.size = group.size)
       bhat = softplus(out$par[1])
       ahat = softplus(out$par[2])
@@ -519,8 +519,8 @@ deriveEstimation <-  function(Y, kernel, b0 = 1, a0=1, s0=1, bu =20, sl = 0, su 
     t = rownames(Y) %>% as.numeric()
     for (i in 1:ncol(Y)) {
       yi = Y[,i]
-      out <- optim(c(b0,1,2), nl_rbf, method="L-BFGS-B",lower=c(-5,-2,sl),
-                   upper=c(20,Inf,su),
+      out <- optim(c(b0,a0,s0), nl_rbf, method="L-BFGS-B",lower=c(-5,-2,sl),
+                   upper=c(20,bu,su),
                    t= t, Y=yi, delta=delta,group.size = group.size)
       bhat = softplus(out$par[1])
       ahat = softplus(out$par[2])
@@ -544,8 +544,8 @@ deriveEstimation <-  function(Y, kernel, b0 = 1, a0=1, s0=1, bu =20, sl = 0, su 
     # perform LMat parameter estimation
     for (i in 1:ncol(Y)) {
       yi = Y[,i]
-      out <- optim(c(b0,1,1), nl_matern, method="L-BFGS-B",lower=c(-10,-10,sl),
-                   upper=c(20,Inf,su),
+      out <- optim(c(b0,a0,s0), nl_matern, method="L-BFGS-B",lower=c(-10,-10,sl),
+                   upper=c(bu,Inf,su),
                    t= t, Y=yi, delta=delta,group.size = group.size)
       bhat = softplus(out$par[1])
       ahat = softplus(out$par[2])
@@ -703,6 +703,7 @@ interpolation.kernel <- function(t, Y_shift, delta, group.size, params, ntest, k
 # helper function for simulation prediction which only need posterior mean
 interpolation_sim <- function(t,Y,ytest,params,ttest, kernel = "lexp", prediction = TRUE){
   ntest = length(ttest)/2
+  k = nrow(Y)
   # tt2 <- tt+shat # use shat=0 if directly model the predicted value after shift
 
   ## derive original inverse covariance kernel
@@ -753,6 +754,61 @@ interpolation_sim <- function(t,Y,ytest,params,ttest, kernel = "lexp", predictio
     ssq = t(yi) %*% pinv(Sigmap2) %*% yi
     ll <- - (1/2 * ssq) - (1/2)*ldetK - k/2*log(2*pi)
 
+    mup2_shift <- c(mup2_shift,ll)
+  }
+  if(kernel == "lmatern"){
+    bhat <- params[1]
+    ahat <- params[2]
+    shat <- params[3]
+    tau2hat2 <- params[4]
+    
+    t2hat <- t2+shat
+    delta = Matrix(1-bdiag(replicate(2,matrix(1,n,n),simplify=FALSE)),sparse = TRUE)
+    deltatest = Matrix(1-bdiag(replicate(2,matrix(1,ntest,ntest),simplify=FALSE)),sparse = TRUE)
+    group.index.test <- rep(c(0,shat),each=ntest)
+    if(isTRUE(prediction)){
+      ttesthat <- ttest + group.index.test
+    }else{
+      ttesthat <- ttest
+    }
+    ## derive original inverse covariance kernel
+    v = 1.5  # Matérn ν parameter
+    Ahat = (ahat^2)*delta+1
+    D <- sqrt(plgp::distance(c(t1, t2hat)))
+    D[D == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * D)^v
+    part2 = (Ahat^(v + 0.5))
+    part3 = besselK(bhat * D, nu = v)
+    Vk = (part1 * part3 / part2)%>% as.matrix()
+    Vi <- pinv(Vk) ## psduo-inverse covariance matrix
+    
+    ## derive test sets inverse covariance kernel
+    Ahat = (ahat^2)*deltatest+1
+    Dtest <- sqrt(plgp::distance(ttest))
+    Dtest[Dtest == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * Dtest)^v
+    part2 = (Ahat^(v + 0.5))
+    part3 = besselK(bhat * Dtest, nu = v)
+    Vtt = (part1 * part3 / part2)%>% as.matrix()
+    
+    ## derive off diagonal inverse covariance kernel
+    deltaoff = Matrix(1-bdiag(replicate(2,matrix(1,ntest,n),simplify=FALSE)),sparse = TRUE)
+    Ahatoff = (ahat^2)*deltaoff+1
+    Dtestoff <- sqrt(plgp::distance(ttesthat,c(t1,t2hat)))
+    Dtestoff[Dtestoff == 0] <- 1e-8  # Avoid division by zero
+    part1 = (bhat * Dtestoff)^v
+    part2 = (Ahatoff^(v + 0.5))
+    part3 = besselK(bhat * Dtestoff, nu = v)
+    Vt = (part1 * part3 / part2)%>% as.matrix() 
+    
+    mup2_shift <- Vt %*% Vi %*% Y
+    # prediction variance
+    Sigmap2 <- tau2hat2*(Vtt-Vt%*%Vi%*%t(Vt))
+    yi= ytest-mup2_shift
+    ldetK <- determinant(Sigmap2, logarithm=TRUE)$modulus
+    ssq = t(yi) %*% pinv(Sigmap2) %*% yi
+    ll <- - (1/2 * ssq) - (1/2)*ldetK - k/2*log(2*pi)
+    
     mup2_shift <- c(mup2_shift,ll)
   }
   if(kernel == "lrbf"){
