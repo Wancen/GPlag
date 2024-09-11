@@ -1,5 +1,5 @@
 # Simulate data
-simulateData <- function(b,a,s, tau2, n, kernel, timemax = 25, fixrange = FALSE){
+simulateData <- function(b,a,s, tau2, n, kernel, timemax = 25, fixrange = FALSE, n_replicate = 100){
   increment =1
   if(isTRUE(fixrange)){
     t1_tilde <- matrix(seq(0, timemax, length.out = n), ncol=1)
@@ -58,7 +58,7 @@ simulateData <- function(b,a,s, tau2, n, kernel, timemax = 25, fixrange = FALSE)
     sigma = part1 * part3 /part2
   }
   ## generate 100 replicates under a prior with MVN(0,sigma)
-  Y <- rmvnorm(100, sigma= sigma %>% as.matrix()) %>% t()
+  Y <- rmvnorm(n_replicate, sigma= sigma %>% as.matrix()) %>% t()
   rownames(Y) <- tinput - s.expand
   return(Y)
 }
